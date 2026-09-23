@@ -1,0 +1,414 @@
+/* Layout, plugin bar and panel rules are copied from the chatroom's
+   eyechat-client/public/theme.css so the panel sizes the same. The chat rules
+   at the bottom are this template's own. */
+
+/* ─── Base ────────────────────────────────────────────────────────────────── */
+
+:read-write {
+  font-family: Inter;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+}
+
+a {
+  text-decoration: underline;
+  color: lightblue;
+  cursor: pointer;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 5px;
+  background: #5F5F5F;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* ─── Layout ──────────────────────────────────────────────────────────────── */
+
+#root {
+  height: 100vh;       /* fallback for browsers without dvh */
+  height: 100dvh;      /* excludes mobile browser UI (address bar) so the header stays on-screen */
+  width: 100vw;
+  display: flex;
+  flex-direction: row;
+}
+
+#main-container {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  width: 100%;
+  overflow: hidden;
+  background: black;
+}
+
+/* ─── Sidebar ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .sideBar {
+    display: none !important;
+  }
+}
+
+.sideBar {
+  background-color: #111;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  height: 100%;
+  z-index: 4;
+  width: 65px;
+}
+
+.pluginSelectionContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  margin-top: 10px;
+}
+
+.pluginSelect {
+  background-color: #333;
+  height: 50px;
+  width: 50px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.pluginSelect:hover {
+  background-color: #444;
+}
+
+.pluginSelectActive {
+  background-color: #39f;
+  color: #fff;
+}
+
+.appViewToggle {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  height: 45px;
+  width: 50px;
+  border-bottom: 1px solid #333;
+}
+
+.appViewToggle span {
+  padding: 0px;
+  height: 30px;
+  width: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 8px;
+}
+
+
+.codeRunnerPanel {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+  z-index: 1;
+  box-shadow: #111 0px 0px 4px;
+  height: 100%;
+  flex: 1;
+}
+
+.codeRunnerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #1b1b1b;
+  border-bottom: 1px solid #333;
+  padding: 4px 8px;
+  color: #ddd;
+  font-size: 13px;
+}
+
+.codeRunnerTitle {
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeRunnerActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.codeRunnerActions span {
+  cursor: pointer;
+  font-size: 18px;
+  opacity: 0.7;
+}
+
+.codeRunnerActions span:hover {
+  opacity: 1;
+}
+
+.resizeBar {
+  width: 10px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  background-color: #111111;
+}
+
+.resizeHandle {
+  width: 10px;
+  height: 50px;
+  background-color: #282828;
+  cursor: col-resize;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: white;
+}
+
+
+/* ─── Dev chat ────────────────────────────────────────────────────────────── */
+
+.chat {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: #181818;
+  color: #ddd;
+}
+
+.chatMain {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.chatHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #333;
+}
+
+.chatChannel {
+  font-weight: 600;
+}
+
+.chatStatus {
+  font-size: 12px;
+  color: #8a8a8a;
+}
+
+.chatStatusOff {
+  color: #f0a040;
+}
+
+.chatMessages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 14px;
+}
+
+.chatEmpty {
+  color: #8a8a8a;
+  padding: 20px 0;
+}
+
+.message {
+  padding: 3px 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.messageNick {
+  font-weight: 600;
+  color: #6cb4ff;
+  margin-right: 8px;
+}
+
+.messageSystem {
+  color: #9a9a9a;
+  font-style: italic;
+}
+
+.chatInput {
+  padding: 10px 14px;
+  border-top: 1px solid #333;
+}
+
+.chatInput input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #222;
+  color: #eee;
+  font: inherit;
+}
+
+.chatInput input:focus {
+  outline: 2px solid #39f;
+  outline-offset: -1px;
+}
+
+.chatUsers {
+  width: 170px;
+  border-left: 1px solid #333;
+  padding: 10px;
+  overflow-y: auto;
+  font-size: 14px;
+}
+
+.chatUsersTitle {
+  color: #8a8a8a;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.chatUser {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.chatUserMe {
+  color: #fff;
+  font-weight: 600;
+}
+
+.chatUserTrust {
+  color: #8a8a8a;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .chatUsers {
+    display: none;
+  }
+}
+
+/* ─── Upload to copecloud ─────────────────────────────────────────────────── */
+
+.chatHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload {
+  position: relative;
+}
+
+.uploadBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: #39f;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.uploadBtn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.uploadBtn:hover {
+  background: #2a85e0;
+}
+
+.uploadBtn:disabled {
+  background: #2a5580;
+  cursor: progress;
+}
+
+.uploadBtn:focus-visible,
+.uploadDismiss:focus-visible {
+  outline: 2px solid #9cf;
+  outline-offset: 2px;
+}
+
+/* drops down from the button, so it never shifts the chat */
+.uploadResult {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 320px;
+  max-width: 80vw;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 34px 10px 12px;
+  border: 1px solid #2f6b3c;
+  border-radius: 6px;
+  background: #16261a;
+  color: #cfe9d5;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+.uploadError {
+  border-color: #7a3434;
+  background: #2a1616;
+  color: #f3c4c4;
+}
+
+.uploadResult a {
+  color: #8cc8ff;
+}
+
+.uploadSkipped {
+  color: #bbb;
+}
+
+.uploadDismiss {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.uploadDismiss .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.uploadDismiss:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
