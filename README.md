@@ -37,7 +37,7 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
   "name": "myplugin",
   "displayMode": "sidebar",
   "owner": "",
-  "copecloudUrl": "http://178.128.159.205"
+  "copecloudUrl": "https://cloud.cope.chat"
 }
 ```
 
