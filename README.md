@@ -37,7 +37,7 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
   "name": "myplugin",
   "displayMode": "sidebar",
   "owner": "",
-  "copecloudUrl": "http://localhost:8080"
+  "copecloudUrl": "http://178.128.159.205"
 }
 ```
 
@@ -47,7 +47,8 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
   draggable window). It is your default; viewers can pop a plugin out or dock
   it for themselves with the buttons in its header.
 - `owner` is your copecloud username. It's only needed for uploading.
-- `copecloudUrl` is the copecloud server to upload to.
+- `copecloudUrl` is the copecloud server to upload to. It defaults to the
+  live server; use `http://localhost:8080` for a copecloud on your own machine.
 
 ## Uploading to copecloud
 

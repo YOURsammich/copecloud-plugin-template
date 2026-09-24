@@ -18,7 +18,7 @@ const CLIENT_FILE = 'client.svelte';
 //copecloud stores file contents as text, so anything else would be mangled
 const TEXT_EXTENSIONS = ['.svelte', '.js', '.mjs', '.ts', '.css', '.json', '.html', '.svg', '.txt', '.md'];
 
-const DEFAULT_URL = 'http://localhost:8080';
+const DEFAULT_URL = 'http://178.128.159.205';
 
 function listFiles (dir, base = dir) {
   if (!fs.existsSync(dir)) return [];
