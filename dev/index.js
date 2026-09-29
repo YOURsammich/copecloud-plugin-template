@@ -19,6 +19,7 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 
 const db = require('./db');
+const wallet = require('./wallet');
 const runtime = require('./runtime');
 const uploader = require('./upload');
 const pluginClientTools = require('./clientTools');
@@ -118,8 +119,16 @@ function chatBroadcast (eventName, data) {
   chatUsers.forEach(user => chatSend(user, eventName, data));
 }
 
+//Everyone counts as a logged-in account here, so coins work without a login.
 function publicUser (user) {
-  return { id: user.id, nick: user.nick, trust: user.trust, registered: false };
+  return { id: user.id, nick: user.nick, trust: user.trust, registered: true, coins: wallet.balance(user.nick) };
+}
+
+//Tell every tab of a nick about its new balance, as the chatroom does.
+function publishBalance (nick) {
+  chatUsers
+    .filter(user => user.nick.toLowerCase() === String(nick).toLowerCase())
+    .forEach(user => setUserState(user, { coins: wallet.balance(user.nick) }));
 }
 
 //Like the real chatroom, a second tab with a nick already in the room is
@@ -168,10 +177,89 @@ const COMMANDS = {
   reload (user) {
     chatSend(user, 'pluginReload', {});
   },
+  coins (user, arg) {
+    const coins = parseInt(arg, 10);
+    if (!Number.isInteger(coins) || coins < 0) return systemMessage(user, 'usage: /coins <number>');
+    wallet.setBalance(user.nick, coins);
+    publishBalance(user.nick);
+    systemMessage(user, `you now have ₵${coins}`);
+  },
+  //The chatroom's /pluginwallet and /pluginperm, for your plugin only.
+  pluginwallet (user) {
+    const w = wallet.wallet(manifest.name);
+    systemMessage(user, `${w.appname}: ₵${w.coins}, accept payments ${w.accept ? 'on' : 'off'}, pay out ${w.payout ? 'on' : 'off'}`);
+  },
+  pluginperm (user, arg) {
+    const [perm, state] = arg.toLowerCase().split(/\s+/);
+    if (!['accept', 'payout'].includes(perm) || !['on', 'off'].includes(state)) {
+      return systemMessage(user, 'usage: /pluginperm <accept|payout> <on|off>');
+    }
+    wallet.setPermission(manifest.name, perm, state === 'on');
+    COMMANDS.pluginwallet(user);
+  },
   help (user) {
-    systemMessage(user, '/nick <name>  /trust <number>  /reload (reload the plugin)');
+    systemMessage(user, '/nick <name>  /trust <number>  /reload (reload the plugin)  ' +
+      '/coins <number>  /pluginwallet  /pluginperm <accept|payout> <on|off>');
   }
 };
+
+//What the chat page sends about plugin coins (see the chatroom's
+//handleConnection.js: pluginPay / pluginTrust / pluginTrustList).
+function handlePluginCoins (user, eventName, data) {
+  data = data || {};
+
+  if (eventName === 'pluginPay') {
+    let result;
+    if (!data.confirmed && !wallet.trustedPlugins(user.nick).includes(data.appname)) {
+      result = { ok: false, error: 'Payment needs confirming.', needsConfirm: true };
+    } else {
+      result = wallet.payIn(user.nick, data.appname, data.amount, data.memo);
+    }
+    if (result.ok) {
+      publishBalance(user.nick);
+      if (data.trust) {
+        wallet.setTrusted(user.nick, data.appname, true);
+        chatSend(user, 'pluginTrustList', wallet.trustedPlugins(user.nick));
+      }
+    }
+    chatSend(user, 'pluginPayResult', { requestId: data.requestId, ...result });
+  } else if (eventName === 'pluginTrust') {
+    wallet.setTrusted(user.nick, data.appname, !!data.trusted);
+    chatSend(user, 'pluginTrustList', wallet.trustedPlugins(user.nick));
+  } else if (eventName === 'pluginTrustList') {
+    chatSend(user, 'pluginTrustList', wallet.trustedPlugins(user.nick));
+  }
+}
+
+//What a plugin's server half reaches through tools.chat / tools.wallet. In
+//production these go to the chatroom's plugin API.
+runtime.configure({
+  chat: {
+    recentMessages: (channel, limit) => db.recentMessages(limit),
+    search: (text, opts) => db.searchMessages(text, opts || {}),
+    user (nick) {
+      const user = chatUsers.find(u => u.nick.toLowerCase() === String(nick).toLowerCase());
+      return user ? { nick: user.nick, flair: null, hat: null, avatar: null, trust: user.trust, coins: wallet.balance(user.nick) } : null;
+    },
+    channel: (name) => ({
+      name: name || 'main',
+      topic: 'local dev chatroom',
+      owner: OWNER,
+      icon: null,
+      banner: null,
+      online: chatUsers.map(u => ({ nick: u.nick, registered: true, afk: false }))
+    })
+  },
+  wallet: {
+    balance: () => wallet.wallet(manifest.name),
+    claim: (receipt) => wallet.claim(manifest.name, receipt),
+    pay (nick, amount, memo) {
+      const result = wallet.payOut(manifest.name, nick, amount, memo, chatUsers);
+      if (result.ok) publishBalance(result.nick);
+      return result;
+    }
+  }
+});
 
 function handleChatMessage (user, text) {
   text = String(text || '').trim().slice(0, 1000);
@@ -211,6 +299,7 @@ chatWss.on('connection', (ws, req) => {
       return;
     }
     if (message.eventName === 'message') handleChatMessage(user, message.data);
+    else if (/^plugin(Pay|Trust|TrustList)$/.test(message.eventName)) handlePluginCoins(user, message.eventName, message.data);
   });
 
   ws.on('close', () => {

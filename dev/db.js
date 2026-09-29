@@ -1,10 +1,11 @@
-//Stands in for the two Postgres databases a plugin touches in production:
+//Stands in for the data a plugin touches in production:
 //
 //  plugin tables  -> copecloud's db, via tools.initDb/dbSet/dbGet/dbDelete.
 //                    Kept in .dev/plugin.sqlite so your data survives restarts.
-//  chatroom db    -> the chatroom's `awakens` db, via tools.queryMsgLog. Here it
-//                    is in memory: a message_log fed by the local chat, plus a
-//                    few sample emojis. It starts fresh every run.
+//  chat messages  -> what tools.chat.recentMessages / search read from the
+//                    chatroom's plugin API. Here it is in memory: a message_log
+//                    fed by the local chat, plus a few sample emojis. It starts
+//                    fresh every run.
 //
 //SQLite is not Postgres. Simple SELECT/INSERT/DELETE behave the same, but the
 //dialects differ at the edges; see "Differences from production" in the README.
@@ -94,18 +95,29 @@ function logMessage ({ nick, message }) {
   return messageCount;
 }
 
-//Returns the same shape as a pg result, since that is what production hands
-//back: plugins read `.rows`.
-function queryMsgLog (query) {
-  const statement = chatDb.prepare(query);
+//Same shape as the chatroom's plugin API returns, newest first.
+function publicMessage (row) {
+  return { nick: row.nick, message: row.message, messageType: 'chat', time: row.time, count: row.count, flair: row.flair, hat: null, avatar: null };
+}
 
-  if (/^\s*(select|with|pragma)\b/i.test(query)) {
-    const rows = statement.all();
-    return { rows, rowCount: rows.length };
-  }
+function recentMessages (limit) {
+  const n = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 100);
+  return chatDb.prepare('SELECT * FROM message_log ORDER BY count DESC LIMIT ?').all(n).map(publicMessage);
+}
 
-  const info = statement.run();
-  return { rows: [], rowCount: Number(info.changes) };
+//The chatroom uses Postgres full-text search; a substring match is close
+//enough to develop against.
+function searchMessages (text, { nick, limit } = {}) {
+  const n = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 50);
+  const conds = [];
+  const params = [];
+  if (text) { conds.push('lower(message) LIKE ?'); params.push('%' + String(text).toLowerCase() + '%'); }
+  if (nick) { conds.push('lower(nick) = ?'); params.push(String(nick).toLowerCase()); }
+  if (!conds.length) return [];
+  return chatDb
+    .prepare(`SELECT * FROM message_log WHERE ${conds.join(' AND ')} ORDER BY count DESC LIMIT ?`)
+    .all(...params, n)
+    .map(publicMessage);
 }
 
 function getEmojis () {
@@ -118,6 +130,7 @@ module.exports = {
   dbGet,
   dbDelete,
   logMessage,
-  queryMsgLog,
+  recentMessages,
+  searchMessages,
   getEmojis
 };

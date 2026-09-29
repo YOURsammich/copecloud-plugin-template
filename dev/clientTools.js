@@ -97,6 +97,35 @@ const pluginClientTools = {
       get (key) {
         return this._user[key];
       },
+      //The viewer's copecoin balance, or null for a guest.
+      getCoins () {
+        const id = Math.random().toString(36).slice(2);
+        return new Promise((resolve) => {
+          function onMessage (e) {
+            if (e.source !== window.parent || !e.data || e.data.copecloud !== 'coins' || e.data.id !== id) return;
+            window.removeEventListener('message', onMessage);
+            resolve(e.data.coins);
+          }
+          window.addEventListener('message', onMessage);
+          window.parent.postMessage({ copecloud: 'requestCoins', id: id }, '*');
+        });
+      },
+      //Ask the viewer to pay this plugin. The chatroom shows its own confirm
+      //(unless they fully trust the plugin) and resolves with
+      //{ ok, receipt, error, cancelled }. Send the receipt to your server half
+      //and redeem it there with tools.wallet.claim, which says who really paid.
+      requestPayment (amount, memo) {
+        const id = Math.random().toString(36).slice(2);
+        return new Promise((resolve) => {
+          function onMessage (e) {
+            if (e.source !== window.parent || !e.data || e.data.copecloud !== 'paymentResult' || e.data.id !== id) return;
+            window.removeEventListener('message', onMessage);
+            resolve({ ok: !!e.data.ok, receipt: e.data.receipt, error: e.data.error, cancelled: !!e.data.cancelled });
+          }
+          window.addEventListener('message', onMessage);
+          window.parent.postMessage({ copecloud: 'requestPayment', id: id, amount: amount, memo: memo }, '*');
+        });
+      },
     };
 
     return tools;

@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
 import DraggableWindow from './DraggableWindow';
+import TrustBadge from './TrustBadge';
 
 // The floating half of plugin presentation. Same copecloud iframe the docked
 // CodeRunWindow renders, hung in a DraggableWindow instead of a resizable
@@ -9,7 +10,7 @@ import DraggableWindow from './DraggableWindow';
 // It reports its iframe upward exactly as CodeRunWindow does, because App owns
 // the postMessage bridge that answers a plugin's getNick/getTrust and it must
 // end up pointing at whichever of the two is currently mounted.
-function PluginWindow({ giveRefresh, giveIframe, pluginName, owner, copeCloud, onClose, onDock }) {
+function PluginWindow({ giveRefresh, giveIframe, pluginName, owner, copeCloud, onClose, onDock, trusted, onRevokeTrust }) {
   const iframeRef = useRef(null);
   const src = copeCloud + 'v/' + (owner || 'sammich') + '/' + pluginName;
   const srcRef = useRef(src);
@@ -28,7 +29,8 @@ function PluginWindow({ giveRefresh, giveIframe, pluginName, owner, copeCloud, o
       initialLeft={100}
       initialTop={70}
       bodyStyle={{ padding: 0, overflow: 'hidden' }}
-      headerActions={
+      headerActions={<>
+        {trusted ? <TrustBadge pluginName={pluginName} onRevoke={onRevokeTrust} /> : null}
         <span
           className='material-symbols-outlined'
           onClick={onDock}
@@ -37,7 +39,7 @@ function PluginWindow({ giveRefresh, giveIframe, pluginName, owner, copeCloud, o
         >
           dock_to_left
         </span>
-      }
+      </>}
     >
       <iframe
         ref={iframeRef}

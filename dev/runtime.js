@@ -1,7 +1,12 @@
 //Runs the server half of the plugin with the same `tools` object copecloud
-//gives it (copecloud: modules/plugin_runner.js). Keep the two in step: if a
+//gives it (copecloud: modules/plugin_host.js). Keep the two in step: if a
 //tool is added or changes shape there, mirror it here, or plugins that work
 //locally will break once they are uploaded.
+//
+//One difference: copecloud runs server.js in a sandboxed child process (no
+//filesystem, no environment). Here it runs in the dev server's own process,
+//so code that reaches for `process` or `require` will work locally and fail
+//once uploaded. Stick to `tools`.
 
 const db = require('./db');
 
@@ -10,6 +15,13 @@ const users = [];
 
 let events = {};
 let middlewares = [];
+
+//set by index.js, which owns the chat users and the wallet stand-in
+let providers = null;
+
+function configure (p) {
+  providers = p;
+}
 
 //every open socket for that nick, one per tab
 function findAllByNick (nick) {
@@ -53,8 +65,38 @@ const tools = {
   roomEmit (eventName, data) {
     users.forEach(user => send(user, 'pluginEvent', { eventName, data }));
   },
-  queryMsgLog (query) {
-    return later(() => db.queryMsgLog(query));
+  //Chat data and this plugin's coins. In production these go through the
+  //chatroom's plugin API; index.js supplies local stand-ins (configure).
+  chat: {
+    recentMessages (channel = 'main', limit = 50) {
+      return later(() => providers.chat.recentMessages(channel, limit));
+    },
+    search (text, opts = {}) {
+      return later(() => providers.chat.search(text, opts));
+    },
+    user (nick) {
+      return later(() => providers.chat.user(nick));
+    },
+    channel (name = 'main') {
+      return later(() => providers.chat.channel(name));
+    }
+  },
+  wallet: {
+    balance () {
+      return later(() => providers.wallet.balance());
+    },
+    pay (nick, amount, memo) {
+      return later(() => providers.wallet.pay(nick, amount, memo));
+    },
+    claim (receipt) {
+      return later(() => providers.wallet.claim(receipt));
+    }
+  },
+  queryMsgLog () {
+    return Promise.reject(new Error(
+      'tools.queryMsgLog has been removed. Use tools.chat.recentMessages, tools.chat.search, ' +
+      'tools.chat.user or tools.chat.channel instead.'
+    ));
   },
   getEmojis () {
     return later(() => db.getEmojis());
@@ -92,10 +134,19 @@ function run (code) {
   }
 }
 
-function trigger (eventName, user, data) {
+//Handlers get the same plain { nick, id } production's sandbox passes, not
+//the socket.
+function trigger (eventName, socketUser, data) {
+  const user = { nick: socketUser.nick, id: socketUser.id };
+
   let middledata;
   for (let middleware of middlewares) {
-    middledata = middleware(user, eventName, data);
+    try {
+      middledata = middleware(user, eventName, data);
+    } catch (e) {
+      console.log('[plugin] middleware error:', e);
+      return;
+    }
     if (middledata === false) {
       console.log('middleware returned false');
       return;
@@ -103,11 +154,14 @@ function trigger (eventName, user, data) {
   }
 
   (events[eventName] || []).forEach(callback => {
+    //as in production, a handler that throws is logged and the plugin keeps
+    //running
     try {
-      callback(user, data, middledata);
+      const result = callback(user, data, middledata);
+      if (result && typeof result.catch === 'function') {
+        result.catch(e => console.log(`[plugin] error in '${eventName}' handler:`, e));
+      }
     } catch (e) {
-      //production would take the whole server down here; a crash in dev
-      //should just show up in the log
       console.log(`[plugin] error in '${eventName}' handler:`, e);
     }
   });
@@ -143,6 +197,7 @@ function connect (ws, nick) {
 }
 
 module.exports = {
+  configure,
   run,
   connect
 };

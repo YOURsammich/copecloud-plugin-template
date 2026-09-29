@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
+import TrustBadge from './TrustBadge';
 
-function CodeRunWindow({ giveRefresh, giveIframe, draggingWindow, pluginName, owner, copeCloud, onClose, onPopOut }) {
+function CodeRunWindow({ giveRefresh, giveIframe, draggingWindow, pluginName, owner, copeCloud, onClose, onPopOut, trusted, onRevokeTrust }) {
   const [chatWidth, setChatWidth] = useState(600);
   const src = copeCloud + 'v/' + (owner || 'sammich') + '/' + pluginName;
   const resizeBarRef = useRef(null);
@@ -50,6 +51,7 @@ function CodeRunWindow({ giveRefresh, giveIframe, draggingWindow, pluginName, ow
         <div className='codeRunnerHeader'>
           <span className='codeRunnerTitle'>{pluginName}</span>
           <span className='codeRunnerActions'>
+            {trusted ? <TrustBadge pluginName={pluginName} onRevoke={onRevokeTrust} /> : null}
             <span className='material-symbols-outlined' onClick={onPopOut} title='Pop out'>open_in_new</span>
             <span className='material-symbols-outlined' onClick={onClose} title='Close'>close</span>
           </span>

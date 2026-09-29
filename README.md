@@ -36,7 +36,6 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
 {
   "name": "myplugin",
   "displayMode": "sidebar",
-  "owner": "",
   "copecloudUrl": "https://cloud.cope.chat"
 }
 ```
@@ -46,11 +45,20 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
 - `displayMode` is `sidebar` (docked next to the chat) or `floating` (a
   draggable window). It is your default; viewers can pop a plugin out or dock
   it for themselves with the buttons in its header.
-- `owner` is your copecloud username. It's only needed for uploading.
 - `copecloudUrl` is the copecloud server to upload to. It defaults to the
   live server; use `http://localhost:8080` for a copecloud on your own machine.
 
+An `owner` field from older versions is ignored: an upload belongs to the
+account your dev token signs in as.
+
 ## Uploading to copecloud
+
+You upload as your cope.chat account. Type `/devtoken` in the chat and save
+the token it shows you in a file named `.copecloud-token` next to
+`package.json` (it's gitignored), or set it in the `COPECLOUD_TOKEN`
+environment variable. Keep it secret: it lets anyone edit your plugins.
+`/revokedevtokens` cancels every token you've made. The same token signs you
+in to the copecloud editor.
 
 When your plugin works locally, press **Upload to copecloud** in the chat
 header. It sends everything in `plugin/` to copecloud, which saves it, builds
@@ -88,6 +96,10 @@ The file runs top to bottom as the body of a function. There is no `require`
 and no `import`. Everything reruns on every save, so set up listeners at the
 top level.
 
+On copecloud it runs in a sandboxed process of its own: no filesystem, no
+environment variables, no child processes. Handlers get `user` as a plain
+`{ nick, id }`.
+
 | call | what it does |
 |---|---|
 | `tools.on(event, (user, data) => {})` | handle an event a client sent with `tools.emit` |
@@ -98,8 +110,16 @@ top level.
 | `tools.dbSet(table, {col: value})` | insert a row (returns nothing, so don't `await` it) |
 | `tools.dbGet(table, {col: value})` | promise of the matching rows; no filter returns all |
 | `tools.dbDelete(table, {col: value})` | delete the matching rows |
-| `tools.queryMsgLog(sql)` | promise of `{ rows }` from raw SQL against the chatroom db |
+| `tools.chat.recentMessages(channel, limit)` | promise of recent chat messages, newest first (max 100) |
+| `tools.chat.search(text, {channel, nick, limit})` | promise of matching chat messages (max 50) |
+| `tools.chat.user(nick)` | promise of a public profile, or null |
+| `tools.chat.channel(name)` | promise of channel info and who is online |
+| `tools.wallet.balance()` | promise of your plugin's wallet: `{ coins, accept, payout }` |
+| `tools.wallet.claim(receipt)` | redeem a payment receipt: `{ ok, nick, amount, memo }` |
+| `tools.wallet.pay(nick, amount, memo)` | pay a user from your wallet: `{ ok, error }` |
 | `tools.getEmojis()` | promise of the chatroom's emojis |
+
+`tools.queryMsgLog` has been removed; use `tools.chat.*`.
 
 ### Client (`public/client.svelte`)
 
@@ -107,9 +127,42 @@ top level.
 |---|---|
 | `tools.emit(event, data)` | send to your server half |
 | `tools.on(event, data => {})` | handle an event from your server half |
+| `tools.requestPayment(amount, memo)` | ask the viewer to pay your plugin: `{ ok, receipt, error, cancelled }` |
+| `tools.getCoins()` | promise of the viewer's balance (null for a guest) |
 | `tools.getNick()` | promise of the viewer's chat nick, asked of the chatroom via postMessage |
 | `tools.getTrust()` | promise of the viewer's trust level, same way |
 | `tools.get('nick')` | the socket's identity (see below) |
+
+## Copecoins
+
+Your plugin has its own wallet. Players pay in from the client, the chatroom
+confirms with them, and your server claims the receipt. The claim is the only
+thing that tells you who really paid, because `user.nick` is just a cookie:
+
+```js
+// public/client.svelte
+const res = await tools.requestPayment(25, 'Dice buy-in');
+if (res.ok) tools.emit('joined', { receipt: res.receipt });
+```
+
+```js
+// server.js
+tools.on('joined', async (user, { receipt }) => {
+  const paid = await tools.wallet.claim(receipt);   // once per receipt
+  if (!paid.ok) return;
+  pot += paid.amount;
+  players.push(paid.nick);
+});
+
+async function payWinner (nick) {
+  const res = await tools.wallet.pay(nick, pot, 'Dice pot');
+  if (res.ok) pot = 0;
+}
+```
+
+Paying out needs an admin to grant your plugin **payout** in the chatroom
+(`/pluginperm <plugin> payout on`). Taking payments is allowed by default.
+Locally you grant it yourself with `/pluginperm payout on`.
 
 ## Dev commands
 
@@ -117,6 +170,9 @@ Type these in the chat:
 
 - `/nick <name>` changes your nick. Reload the plugin afterwards so its socket picks it up.
 - `/trust <number>` sets the trust level `tools.getTrust()` returns.
+- `/coins <number>` sets your balance. Everyone starts with ₵1000.
+- `/pluginwallet` shows your plugin's balance and permissions.
+- `/pluginperm <accept|payout> <on|off>` grants or revokes them.
 - `/reload` reloads the plugin.
 - `/help` lists these.
 
@@ -145,18 +201,16 @@ The panel, the plugin page, the websocket protocol and `tools` are copies of
 the real ones. The data behind them is not.
 
 - **The databases are SQLite, not Postgres.** Plugin tables live in
-  `.dev/plugin.sqlite` and survive restarts; delete the file to start over. The
-  chatroom db behind `queryMsgLog` is in memory. It has `message_log`, filled
-  by what you type in the chat, and a few sample `emojis`. Plain
-  SELECT/INSERT/DELETE behave the same. Postgres-only syntax (`ILIKE`,
-  `to_tsquery`, `::` casts, `SERIAL`) won't.
-- **Quote camelCase columns.** Real chatroom columns like `"channelName"` are
-  case-sensitive in Postgres and need the quotes. SQLite doesn't care, so a
-  missing quote works here and fails in production.
+  `.dev/plugin.sqlite` and survive restarts; delete the file to start over.
+  Plain SELECT/INSERT/DELETE behave the same. Postgres-only syntax (`ILIKE`,
+  `::` casts, `SERIAL`) won't.
+- **Chat data is local.** `tools.chat.*` reads what you type in this chat.
+  Search is a plain substring match here and full-text search in production.
+- **Coins are in memory** and reset on every restart.
 - **Plugin tables aren't namespaced** in production. Every plugin shares one
   database, so prefix your table names (`myplugin_scores`, not `scores`).
-- **A handler that throws** is logged here. In production it can take down the
-  copecloud server for everyone, so catch your errors.
+- **Your server code isn't sandboxed here.** It runs inside the dev server, so
+  `process` and friends work locally and fail on copecloud. Stick to `tools`.
 - **`roomEmit` reaches everyone on copecloud** with any plugin open, not just
   your plugin's users. Events are only delivered to handlers with that name,
   so use distinctive event names.

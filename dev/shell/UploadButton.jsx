@@ -19,14 +19,14 @@ function UploadButton() {
       return;
     }
 
-    if (!target.owner) {
+    if (!target.hasToken) {
       setState('error');
-      setResult({ message: 'Set "owner" in plugin/plugin.json to your copecloud username first.' });
+      setResult({ message: 'No dev token. Run /devtoken in the chat and save it in .copecloud-token next to package.json.' });
       return;
     }
 
     const ok = window.confirm(
-      `Upload "${target.name}" to ${target.url} as ${target.owner}?\n\n` +
+      `Upload "${target.name}" to ${target.url} as the account your dev token belongs to?\n\n` +
       'This replaces the files copecloud has for this plugin, including any edits made in the copecloud editor.'
     );
     if (!ok) {
