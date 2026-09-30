@@ -25,6 +25,7 @@ export function parsePluginRequest(data) {
   const id = typeof data.id === 'string' || typeof data.id === 'number' ? data.id : null;
 
   if (data.copecloud === 'requestCoins') return { type: 'requestCoins', id };
+  if (data.copecloud === 'requestIdentity') return { type: 'requestIdentity', id };
 
   if (data.copecloud === 'requestPayment') {
     const amount = data.amount;

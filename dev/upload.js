@@ -51,7 +51,8 @@ function target (manifest) {
     name: manifest.name,
     hasToken: !!readToken(),
     url: String(manifest.copecloudUrl || DEFAULT_URL).replace(/\/+$/, ''),
-    displayMode: manifest.displayMode
+    displayMode: manifest.displayMode,
+    permissions: manifest.permissions || []
   };
 }
 
@@ -102,7 +103,7 @@ async function post (url, body, token) {
 //Resolves { success, message, viewUrl?, skipped? }; never throws, since the
 //result goes straight back to the button.
 async function upload (manifest) {
-  const { name, url, displayMode } = target(manifest);
+  const { name, url, displayMode, permissions } = target(manifest);
   const token = readToken();
 
   if (!token) {
@@ -126,9 +127,9 @@ async function upload (manifest) {
       };
     }
 
-    //The display mode is an app setting, not a file. Status is left alone:
+    //The display mode and permissions are app settings, not files. Status is left alone:
     //going public is a decision for the copecloud editor.
-    await post(url + '/updateAppSettings', { appname: name, displayMode }, token);
+    await post(url + '/updateAppSettings', { appname: name, displayMode, permissions }, token);
 
     //plugin pages are served from their own host; copecloud says which
     const owner = saved.data.owner;

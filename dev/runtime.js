@@ -90,6 +90,9 @@ const tools = {
     },
     claim (receipt) {
       return later(() => providers.wallet.claim(receipt));
+    },
+    refund (receipt) {
+      return later(() => providers.wallet.refund(receipt));
     }
   },
   queryMsgLog () {
@@ -137,7 +140,13 @@ function run (code) {
 //Handlers get the same plain { nick, id } production's sandbox passes, not
 //the socket.
 function trigger (eventName, socketUser, data) {
-  const user = { nick: socketUser.nick, id: socketUser.id };
+  const user = {
+    nick: socketUser.nick,
+    id: socketUser.id,
+    registered: socketUser.registered,
+    trust: socketUser.trust,
+    verified: socketUser.verified
+  };
 
   let middledata;
   for (let middleware of middlewares) {
@@ -167,14 +176,26 @@ function trigger (eventName, socketUser, data) {
   });
 }
 
-//A plugin socket's identity works like copecloud's: the `nick` cookie if the
-//browser has one (the chatroom sets it), else a random id. Note that this is
-//the chat nick only because the chat and the plugin host share a hostname.
-function connect (ws, nick) {
-  const user = { nick, id: nick, ws };
+function sendUserData (user) {
+  send(user, 'userData', {
+    nick: user.nick,
+    id: user.id,
+    registered: user.registered,
+    trust: user.trust,
+    verified: user.verified
+  });
+}
+
+//A plugin socket's identity works like copecloud's (modules/users.js): it
+//starts as an 'anon-' id, and becomes the chat user once the page sends an
+//identity pass from the chat, which `redeem` checks (in production copecloud
+//asks the chatroom). Cookies play no part.
+function connect (ws, redeem) {
+  const id = 'anon-' + require('crypto').randomBytes(8).toString('hex');
+  const user = { nick: id, id, registered: false, trust: null, verified: false, app: null, ws };
   users.push(user);
 
-  send(user, 'userData', { nick: user.nick, id: user.id });
+  sendUserData(user);
 
   ws.on('message', (raw) => {
     let message;
@@ -183,9 +204,21 @@ function connect (ws, nick) {
     } catch {
       return;
     }
+    if (!message || typeof message !== 'object') return;
 
-    if (message.eventName === 'pluginEvent') {
-      const { eventName, data } = message.data || {};
+    if (message.eventName === 'auth') {
+      const { ticket, appname } = message.data || {};
+      const who = (!user.app || user.app === appname) ? redeem(ticket, appname) : null;
+      if (who) {
+        Object.assign(user, { nick: who.nick, registered: who.registered, trust: who.trust, verified: true, app: appname });
+        send(user, 'authResult', { ok: true });
+        sendUserData(user);
+      } else {
+        send(user, 'authResult', { ok: false });
+      }
+    } else if (message.eventName === 'pluginEvent') {
+      const { eventName, data, appname } = message.data || {};
+      if (user.app && appname !== user.app) return;
       trigger(eventName, user, data);
     }
   });

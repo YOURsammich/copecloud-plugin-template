@@ -7,9 +7,11 @@ import Chat from './Chat';
 import CodeRunWindow from './CodeRunWindow';
 import PluginWindow from './PluginWindow';
 import { readOverrides, writeOverrides, resolveMode } from './pluginMode';
-import PluginPaymentDialog from './PluginPaymentDialog';
+import PluginConsentDialog from './PluginConsentDialog';
 import { parsePluginRequest, originOf } from './pluginBridge';
-import { isTrusted, requestTrustList, setPluginTrusted, useTrustedPlugins } from './pluginTrust';
+import {
+  isTrusted, requestTrustList, setPluginTrusted, useTrustedPlugins, useTrustLoaded, wantsWallet,
+} from './pluginTrust';
 
 // The plugin host, standing in for copecloud. Same hostname as this page so
 // the two share the `nick` cookie, different port so the plugin is
@@ -43,11 +45,13 @@ function App() {
   const lastAppRef = useRef(null);
   const myUserRef = useRef(null);
   const openedRef = useRef(false);
-  const [payment, setPayment] = useState(null);
   const pendingPayRef = useRef(null);
+  // Identity passes asked of the server, by request id (see sendIdentity).
+  const ticketRequestsRef = useRef(new Map());
   const pluginRequestRef = useRef(null);
   const openPluginRef = useRef(null);
   const trustedPlugins = useTrustedPlugins();
+  const trustLoaded = useTrustLoaded();
 
   const myUser = userlist.find(u => u.id === userID);
   myUserRef.current = myUser;
@@ -101,18 +105,51 @@ function App() {
       }
     });
 
+    // Identity passes coming back from the server, each for the plugin frame
+    // that asked (see sendIdentity).
+    socket.on('pluginTicket', ({ requestId, ticket } = {}) => {
+      const waiting = ticketRequestsRef.current.get(requestId);
+      if (!waiting) return;
+      ticketRequestsRef.current.delete(requestId);
+      if (ticket) replyToPlugin(waiting.win, { copecloud: 'identity', id: waiting.id, ticket });
+    });
+
     socket.on('pluginPayResult', (result) => {
       const pending = pendingPayRef.current;
       if (!pending || result?.requestId !== pending.requestId) return;
-      if (result.needsConfirm) {
-        setPayment(pending);
-        return;
-      }
       finishPayment(pending, { ok: !!result.ok, receipt: result.receipt, error: result.error });
     });
 
     socket.on('open', () => requestTrustList());
   }, []);
+
+  // An identity pass for the open plugin, handed to its frame (as in the
+  // chatroom's App.jsx).
+  function sendIdentity(appname, win, id) {
+    const requestId = Math.random().toString(36).slice(2);
+    ticketRequestsRef.current.set(requestId, { win, id });
+    socket.emit('pluginTicket', { requestId, appname });
+  }
+
+  // A nick change (/nick) gets the open plugin a fresh pass.
+  const lastIdentityRef = useRef(null);
+  useEffect(() => {
+    const appname = openPluginRef.current?.appname;
+    const win = iframeRef.current?.contentWindow;
+    const key = appname + '\n' + myUser?.nick;
+    if (!appname || !win || !myUser?.nick) return;
+    if (lastIdentityRef.current && lastIdentityRef.current.appname === appname && lastIdentityRef.current.key !== key) {
+      sendIdentity(appname, win, null);
+    }
+    lastIdentityRef.current = { appname, key };
+  }, [myUser?.nick, showApp]);
+
+  // Push balance changes to the open plugin (tools.onCoins).
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow || !myUser?.registered) return;
+    replyToPlugin(iframe.contentWindow, { copecloud: 'coinsChanged', coins: myUser.coins ?? 0 });
+  }, [myUser?.coins, myUser?.registered]);
 
   // The coin half of the bridge, as in the chatroom's App.jsx.
   pluginRequestRef.current = (request, win) => {
@@ -125,9 +162,16 @@ function App() {
       return;
     }
 
+    if (request.type === 'requestIdentity') {
+      sendIdentity(appname, win, request.id);
+      return;
+    }
+
     const fail = (error) => replyToPlugin(win, { copecloud: 'paymentResult', id: request.id, ok: false, error });
     if (request.type === 'invalid') return fail(request.error);
     if (!user.registered) return fail('Log in to pay with coins.');
+    if (!wantsWallet(openPluginRef.current)) return fail("This plugin didn't ask for wallet access. Add \"permissions\": [\"wallet\"] to plugin.json.");
+    if (!isTrusted(appname)) return fail("You haven't given this plugin wallet access.");
     if (pendingPayRef.current) return fail('Another payment is still waiting.');
 
     const pending = {
@@ -139,21 +183,15 @@ function App() {
       win,
     };
     pendingPayRef.current = pending;
-    if (isTrusted(appname)) {
-      sendPayment(pending, { confirmed: false });
-    } else {
-      setPayment(pending);
-    }
+    sendPayment(pending);
   };
 
-  function sendPayment(pending, { confirmed, trust = false }) {
+  function sendPayment(pending) {
     socket.emit('pluginPay', {
       requestId: pending.requestId,
       appname: pending.appname,
       amount: pending.amount,
       memo: pending.memo,
-      confirmed,
-      trust,
     });
     setTimeout(() => {
       if (pendingPayRef.current === pending) {
@@ -164,7 +202,6 @@ function App() {
 
   function finishPayment(pending, result) {
     if (pendingPayRef.current === pending) pendingPayRef.current = null;
-    setPayment(current => current === pending ? null : current);
     replyToPlugin(pending.win, { copecloud: 'paymentResult', id: pending.id, ...result });
   }
 
@@ -182,14 +219,19 @@ function App() {
   useEffect(() => { if (showApp) lastAppRef.current = showApp; }, [showApp]);
 
   const openPlugin = plugins.find(p => p.appname === showApp) || null;
-  const openMode = openPlugin ? resolveMode(openPlugin, modeOverrides) : null;
   openPluginRef.current = openPlugin;
+
+  // Wallet access is agreed to once, on open, as in the chatroom.
+  const needsWallet = wantsWallet(openPlugin);
+  const consentUnknown = needsWallet && (!myUser || (myUser.registered && !trustLoaded));
+  const needsConsent = needsWallet && !consentUnknown && myUser.registered
+    && !trustedPlugins.includes(openPlugin.appname);
+  const openMode = openPlugin && !consentUnknown && !needsConsent
+    ? resolveMode(openPlugin, modeOverrides) : null;
 
   useEffect(() => {
     const pending = pendingPayRef.current;
-    if (pending && pending.appname !== showApp) {
-      finishPayment(pending, { ok: false, cancelled: true, error: 'Cancelled.' });
-    }
+    if (pending && pending.appname !== showApp) pendingPayRef.current = null;
   }, [showApp]);
 
   function setPluginMode(appname, mode) {
@@ -212,22 +254,20 @@ function App() {
     giveIframe: (iframe) => { iframeRef.current = iframe; },
     onClose: () => setShowApp(null),
     trusted: trustedPlugins.includes(openPlugin.appname),
-    onRevokeTrust: () => setPluginTrusted(openPlugin.appname, false),
+    onRevokeTrust: () => {
+      setPluginTrusted(openPlugin.appname, false);
+      setShowApp(null);
+    },
   };
 
   return (
     <div style={{ flexDirection: 'column', display: 'flex', flex: 1, overflow: 'hidden' }}>
-      {payment ? (
-        <PluginPaymentDialog
-          appname={payment.appname}
-          amount={payment.amount}
-          memo={payment.memo}
-          balance={myUser?.coins}
-          onPay={(trust) => {
-            setPayment(null);
-            sendPayment(payment, { confirmed: true, trust });
-          }}
-          onCancel={() => finishPayment(payment, { ok: false, cancelled: true, error: 'Cancelled.' })}
+      {needsConsent ? (
+        <PluginConsentDialog
+          appname={openPlugin.appname}
+          owner={openPlugin.owner}
+          onAllow={() => setPluginTrusted(openPlugin.appname, true)}
+          onDecline={() => setShowApp(null)}
         />
       ) : null}
 

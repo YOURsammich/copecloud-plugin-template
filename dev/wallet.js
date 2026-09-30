@@ -3,8 +3,8 @@
 //every run starts fresh.
 //
 //Same rules as production:
-//  - a user pays a plugin only from the chat page, after its confirm dialog
-//    (or without one, for a plugin they chose to fully trust);
+//  - a user pays a plugin only from the chat page, and only a plugin they gave
+//    wallet access when they opened it (no prompt per payment);
 //  - the plugin's server redeems the receipt once, with tools.wallet.claim;
 //  - accepting payments is on by default, paying out is off until granted.
 //    Here you grant it yourself: /pluginperm payout on
@@ -80,7 +80,7 @@ function payOut (appname, nick, amount, memo, users) {
   p.coins -= n;
   setBalance(user.nick, balance(user.nick) + n);
   const receipt = String(nextReceipt++);
-  receipts.set(receipt, { appname, nick: user.nick, amount: n, memo: readMemo(memo), time: new Date(), claimed: true });
+  receipts.set(receipt, { appname, nick: user.nick, amount: n, memo: readMemo(memo), time: new Date(), claimed: true, direction: 'out' });
   return { ok: true, receipt, nick: user.nick, coins: p.coins };
 }
 
@@ -89,6 +89,23 @@ function claim (appname, receipt) {
   if (!r || r.appname !== appname || r.claimed) return { ok: false, error: 'No such receipt, or it was already claimed.' };
   r.claimed = true;
   return { ok: true, nick: r.nick, amount: r.amount, memo: r.memo, time: r.time };
+}
+
+//Back to whoever paid it, once, claimed or not. No payout permission needed.
+function refund (appname, receipt) {
+  const r = receipts.get(String(receipt));
+  if (!r || r.appname !== appname || r.direction === 'out') return { ok: false, error: 'No such receipt.' };
+  if (r.refunded) return { ok: false, error: 'That payment was already refunded.' };
+  const p = plugin(appname);
+  if (p.coins < r.amount) return { ok: false, error: `The plugin wallet only has ₵${p.coins}.` };
+
+  p.coins -= r.amount;
+  setBalance(r.nick, balance(r.nick) + r.amount);
+  r.refunded = true;
+  r.claimed = true;
+  const id = String(nextReceipt++);
+  receipts.set(id, { appname, nick: r.nick, amount: r.amount, memo: 'refund of #' + receipt, time: new Date(), claimed: true, direction: 'out' });
+  return { ok: true, receipt: id, nick: r.nick, amount: r.amount, coins: p.coins };
 }
 
 function setPermission (appname, perm, allowed) {
@@ -113,6 +130,7 @@ module.exports = {
   payIn,
   payOut,
   claim,
+  refund,
   setPermission,
   trustedPlugins,
   setTrusted

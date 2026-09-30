@@ -36,6 +36,7 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
 {
   "name": "myplugin",
   "displayMode": "sidebar",
+  "permissions": [],
   "copecloudUrl": "https://cloud.cope.chat"
 }
 ```
@@ -45,6 +46,9 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
 - `displayMode` is `sidebar` (docked next to the chat) or `floating` (a
   draggable window). It is your default; viewers can pop a plugin out or dock
   it for themselves with the buttons in its header.
+- `permissions` is what players must agree to before your plugin opens. The
+  only one so far is `"wallet"`, which you need to take coins (see
+  [Copecoins](#copecoins)). Uploading sends it along with the display mode.
 - `copecloudUrl` is the copecloud server to upload to. It defaults to the
   live server; use `http://localhost:8080` for a copecloud on your own machine.
 
@@ -98,7 +102,7 @@ top level.
 
 On copecloud it runs in a sandboxed process of its own: no filesystem, no
 environment variables, no child processes. Handlers get `user` as a plain
-`{ nick, id }`.
+`{ nick, id, registered, trust, verified }` (see [Who is playing](#who-is-playing)).
 
 | call | what it does |
 |---|---|
@@ -117,6 +121,7 @@ environment variables, no child processes. Handlers get `user` as a plain
 | `tools.wallet.balance()` | promise of your plugin's wallet: `{ coins, accept, payout }` |
 | `tools.wallet.claim(receipt)` | redeem a payment receipt: `{ ok, nick, amount, memo }` |
 | `tools.wallet.pay(nick, amount, memo)` | pay a user from your wallet: `{ ok, error }` |
+| `tools.wallet.refund(receipt)` | give a payment back to whoever made it, once; no payout permission needed |
 | `tools.getEmojis()` | promise of the chatroom's emojis |
 
 `tools.queryMsgLog` has been removed; use `tools.chat.*`.
@@ -127,17 +132,24 @@ environment variables, no child processes. Handlers get `user` as a plain
 |---|---|
 | `tools.emit(event, data)` | send to your server half |
 | `tools.on(event, data => {})` | handle an event from your server half |
-| `tools.requestPayment(amount, memo)` | ask the viewer to pay your plugin: `{ ok, receipt, error, cancelled }` |
+| `tools.requestPayment(amount, memo)` | take a payment from the viewer (needs the wallet permission): `{ ok, receipt, error }` |
 | `tools.getCoins()` | promise of the viewer's balance (null for a guest) |
+| `tools.onCoins(balance => {})` | called whenever the viewer's balance changes, e.g. when a payout lands |
 | `tools.getNick()` | promise of the viewer's chat nick, asked of the chatroom via postMessage |
 | `tools.getTrust()` | promise of the viewer's trust level, same way |
-| `tools.get('nick')` | the socket's identity (see below) |
+| `tools.get('nick')` | who the viewer is, for display: also `'verified'`, `'registered'`, `'trust'` (see Who is playing) |
 
 ## Copecoins
 
-Your plugin has its own wallet. Players pay in from the client, the chatroom
-confirms with them, and your server claims the receipt. The claim is the only
-thing that tells you who really paid, because `user.nick` is just a cookie:
+Your plugin has its own wallet. To take coins, add `"permissions": ["wallet"]`
+to `plugin.json`. The first time a player opens your plugin, the chatroom tells
+them it can take coins from them without asking each time, and opens it only if
+they agree. After that, payments go through with no prompt; the player gets a
+private note in the chat for each one.
+
+Players pay in from the client, and your server claims the receipt. The claim is
+the only thing that tells you who really paid, because `user.nick` is just a
+cookie:
 
 ```js
 // public/client.svelte
@@ -164,24 +176,41 @@ Paying out needs an admin to grant your plugin **payout** in the chatroom
 (`/pluginperm <plugin> payout on`). Taking payments is allowed by default.
 Locally you grant it yourself with `/pluginperm payout on`.
 
+If you take a payment you then can't honour, such as a bet bigger than you can
+cover or a game that was called off, hand it back with
+`tools.wallet.refund(receipt)`. That works without **payout**, because the
+coins can only go back to whoever paid.
+
+To show winnings, listen with `tools.onCoins(balance => ...)` rather than
+calling `tools.getCoins()` after your result arrives: the two travel
+separately in production, and the balance can land second.
+
 ## Dev commands
 
 Type these in the chat:
 
-- `/nick <name>` changes your nick. Reload the plugin afterwards so its socket picks it up.
-- `/trust <number>` sets the trust level `tools.getTrust()` returns.
+- `/nick <name>` changes your nick. Your plugin's server gets the new one too.
+- `/trust <number>` sets your trust level, which your server sees as `user.trust`.
 - `/coins <number>` sets your balance. Everyone starts with ₵1000.
 - `/pluginwallet` shows your plugin's balance and permissions.
 - `/pluginperm <accept|payout> <on|off>` grants or revokes them.
 - `/reload` reloads the plugin.
 - `/help` lists these.
 
+## Who is playing
+
+Every handler gets `user = { nick, id, registered, trust, verified }`. Opened
+from the chat, `user.nick` is the viewer's real chat nick: the chat page hands
+your plugin a one-time pass and the server checks it, so it can't be faked.
+Opened anywhere else, such as the plugin's own tab, `verified` is false and
+`nick` is an `anon-…` id. See copecloud's `docs/chatroom-data-access.md` for
+details.
+
 ## Testing with more than one user
 
-Tabs in the same browser share cookies, so they share one plugin identity, just
-like they do in production. To be a second user, open
-http://127.0.0.1:4000 (a different host, so separate cookies) or use a private
-window.
+Tabs in the same browser share cookies, so they're the same chat user. To be a
+second user, open http://127.0.0.1:4000 (a different host, so separate
+cookies) or use a private window.
 
 ## Ports
 
@@ -214,6 +243,5 @@ the real ones. The data behind them is not.
 - **`roomEmit` reaches everyone on copecloud** with any plugin open, not just
   your plugin's users. Events are only delivered to handlers with that name,
   so use distinctive event names.
-- **`tools.get('nick')`** is the `nick` cookie. That's the chat nick for guests,
-  and a random id when the cookie isn't set. Use `tools.getNick()` when you
-  want the name people see in chat.
+- **Everyone here counts as logged in.** In production a guest's `user.registered`
+  is false, and a guest has no wallet.

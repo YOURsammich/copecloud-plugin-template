@@ -44,9 +44,13 @@ function readManifest () {
   //copecloud only accepts these characters in an app name
   const name = String(manifest.name || 'myplugin').replace(/[^a-zA-Z0-9_-]/g, '') || 'myplugin';
   const displayMode = manifest.displayMode === 'floating' ? 'floating' : 'sidebar';
+  //what players are asked to agree to when they open it; copecloud knows 'wallet'
+  const permissions = Array.isArray(manifest.permissions)
+    ? manifest.permissions.filter(p => p === 'wallet')
+    : [];
 
-  //owner and copecloudUrl are only used by the upload button
-  return { name, displayMode, owner: manifest.owner, copecloudUrl: manifest.copecloudUrl };
+  //copecloudUrl is only used by the upload button
+  return { name, displayMode, permissions, copecloudUrl: manifest.copecloudUrl };
 }
 
 let manifest = readManifest();
@@ -166,7 +170,7 @@ const COMMANDS = {
     const nick = arg.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20);
     if (!nick) return systemMessage(user, 'usage: /nick <name>');
     setUserState(user, { nick: uniqueNick(nick, user) });
-    systemMessage(user, `you are now ${user.nick}. Reload the plugin to pick up the new nick.`);
+    systemMessage(user, `you are now ${user.nick}. Your plugin's server gets the new nick too.`);
   },
   trust (user, arg) {
     const trust = parseInt(arg, 10);
@@ -203,26 +207,46 @@ const COMMANDS = {
   }
 };
 
+//Identity passes, as the chatroom issues them (eyechat-server:
+//src/pluginIdentity.js): the chat page asks for one for the plugin it has
+//open, hands it to the plugin's frame, and the plugin socket redeems it. One
+//plugin, one use, one minute.
+const passes = new Map();
+
+function issuePass (user, appname) {
+  const ticket = require('crypto').randomBytes(24).toString('base64url');
+  passes.set(ticket, { nick: user.nick, registered: true, trust: user.trust, appname, expires: Date.now() + 60000 });
+  return ticket;
+}
+
+function redeemPass (ticket, appname) {
+  const pass = passes.get(ticket);
+  if (!pass) return null;
+  passes.delete(ticket);
+  if (pass.expires < Date.now() || pass.appname !== appname) return null;
+  return { nick: pass.nick, registered: pass.registered, trust: pass.trust };
+}
+
 //What the chat page sends about plugin coins (see the chatroom's
 //handleConnection.js: pluginPay / pluginTrust / pluginTrustList).
 function handlePluginCoins (user, eventName, data) {
   data = data || {};
 
   if (eventName === 'pluginPay') {
+    //no prompt: the player agreed to wallet access when they opened it
     let result;
-    if (!data.confirmed && !wallet.trustedPlugins(user.nick).includes(data.appname)) {
-      result = { ok: false, error: 'Payment needs confirming.', needsConfirm: true };
+    if (!wallet.trustedPlugins(user.nick).includes(data.appname)) {
+      result = { ok: false, error: 'You haven\'t given this plugin wallet access.' };
     } else {
       result = wallet.payIn(user.nick, data.appname, data.amount, data.memo);
     }
+    chatSend(user, 'pluginPayResult', { requestId: data.requestId, ...result });
     if (result.ok) {
       publishBalance(user.nick);
-      if (data.trust) {
-        wallet.setTrusted(user.nick, data.appname, true);
-        chatSend(user, 'pluginTrustList', wallet.trustedPlugins(user.nick));
-      }
+      //the record the chatroom leaves in place of a prompt
+      const memo = typeof data.memo === 'string' && data.memo ? ` (${data.memo.slice(0, 200)})` : '';
+      systemMessage(user, `${data.appname} took ₵${data.amount} from your wallet${memo}. You have ₵${result.coins}.`);
     }
-    chatSend(user, 'pluginPayResult', { requestId: data.requestId, ...result });
   } else if (eventName === 'pluginTrust') {
     wallet.setTrusted(user.nick, data.appname, !!data.trusted);
     chatSend(user, 'pluginTrustList', wallet.trustedPlugins(user.nick));
@@ -253,6 +277,11 @@ runtime.configure({
   wallet: {
     balance: () => wallet.wallet(manifest.name),
     claim: (receipt) => wallet.claim(manifest.name, receipt),
+    refund (receipt) {
+      const result = wallet.refund(manifest.name, receipt);
+      if (result.ok) publishBalance(result.nick);
+      return result;
+    },
     pay (nick, amount, memo) {
       const result = wallet.payOut(manifest.name, nick, amount, memo, chatUsers);
       if (result.ok) publishBalance(result.nick);
@@ -300,6 +329,10 @@ chatWss.on('connection', (ws, req) => {
     }
     if (message.eventName === 'message') handleChatMessage(user, message.data);
     else if (/^plugin(Pay|Trust|TrustList)$/.test(message.eventName)) handlePluginCoins(user, message.eventName, message.data);
+    else if (message.eventName === 'pluginTicket') {
+      const { requestId, appname } = message.data || {};
+      chatSend(user, 'pluginTicket', { requestId, appname, ticket: issuePass(user, appname) });
+    }
   });
 
   ws.on('close', () => {
@@ -363,7 +396,7 @@ chatServer.on('upgrade', (req, socket, head) => {
 // ─── copecloud (:4001) ────────────────────────────────────────────────────────
 
 function pluginRecord () {
-  return { appname: manifest.name, owner: OWNER, status: 'public', displayMode: manifest.displayMode };
+  return { appname: manifest.name, owner: OWNER, status: 'public', displayMode: manifest.displayMode, permissions: manifest.permissions };
 }
 
 //Same page copecloud serves at /v/:user/:appName
@@ -439,11 +472,10 @@ const pluginServer = http.createServer((req, res) => {
 
 const pluginWss = new WebSocketServer({ noServer: true });
 
+//Plugin sockets start anonymous and prove who they are with an identity pass
+//from the chat page, as in production (see issuePass).
 pluginServer.on('upgrade', (req, socket, head) => {
-  const cookies = parseCookies(req.headers.cookie);
-  const nick = cookies.nick || Math.random().toString(36).substring(2, 15);
-
-  pluginWss.handleUpgrade(req, socket, head, ws => runtime.connect(ws, nick));
+  pluginWss.handleUpgrade(req, socket, head, ws => runtime.connect(ws, redeemPass));
 });
 
 // ─── watching plugin/ ─────────────────────────────────────────────────────────
