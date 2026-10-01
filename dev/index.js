@@ -482,7 +482,25 @@ pluginServer.on('upgrade', (req, socket, head) => {
 
 function loadServerCode () {
   const file = path.join(PLUGIN_DIR, 'server.js');
-  runtime.run(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+  runtime.run(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '', manifest.name);
+}
+
+//dev-plugins/<appname>.js stand in for other plugins on copecloud, so
+//tools.plugins.call / publish / subscribe have someone to talk to. Each is
+//the server.js of a plugin called <appname>. They never get uploaded.
+const STAND_IN_DIR = path.join(__dirname, '..', 'dev-plugins');
+
+function loadStandIns () {
+  const standIns = {};
+  if (fs.existsSync(STAND_IN_DIR)) {
+    for (const file of fs.readdirSync(STAND_IN_DIR)) {
+      if (!file.endsWith('.js')) continue;
+      const appname = file.slice(0, -3);
+      if (!/^[a-zA-Z0-9_-]+$/.test(appname)) continue;
+      standIns[appname] = fs.readFileSync(path.join(STAND_IN_DIR, file), 'utf8');
+    }
+  }
+  runtime.runStandIns(standIns);
 }
 
 //Saving in the copecloud editor reruns the server code and reloads the
@@ -499,11 +517,16 @@ function onPluginChange (filename) {
     const changed = [...pending];
     pending = new Set();
 
+    let renamed = false;
     if (changed.includes('plugin.json')) {
+      const before = manifest.name;
       manifest = readManifest();
+      renamed = manifest.name !== before;
       chatBroadcast('pluginList', [pluginRecord()]);
     }
-    if (changed.includes('server.js')) loadServerCode();
+    if (changed.includes('server.js') || renamed) loadServerCode();
+    //a stand-in skipped for sharing the old name may run now
+    if (renamed) loadStandIns();
     if (changed.some(file => file.startsWith('public/'))) await buildPlugin();
 
     chatBroadcast('pluginReload', {});
@@ -514,8 +537,15 @@ async function start () {
   await buildShell();
   await buildPlugin();
   loadServerCode();
+  loadStandIns();
 
   fs.watch(PLUGIN_DIR, { recursive: true }, (event, filename) => onPluginChange(filename));
+  fs.mkdirSync(STAND_IN_DIR, { recursive: true });
+  let standInTimer = null;
+  fs.watch(STAND_IN_DIR, () => {
+    clearTimeout(standInTimer);
+    standInTimer = setTimeout(loadStandIns, 100);
+  });
 
   [chatServer, pluginServer].forEach(server => server.on('error', (e) => {
     if (e.code !== 'EADDRINUSE') throw e;

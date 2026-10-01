@@ -27,6 +27,7 @@ plugin/
   server.js            the server half, runs on copecloud
   public/client.svelte the client half, runs in the chatroom's iframe
   public/...           any other client files, imported relatively
+dev-plugins/           stand-ins for other plugins yours talks to (never uploaded)
 dev/                   the local chatroom and copecloud stand-in; you shouldn't need to touch it
 ```
 
@@ -123,6 +124,10 @@ environment variables, no child processes. Handlers get `user` as a plain
 | `tools.wallet.pay(nick, amount, memo)` | pay a user from your wallet: `{ ok, error }` |
 | `tools.wallet.refund(receipt)` | give a payment back to whoever made it, once; no payout permission needed |
 | `tools.getEmojis()` | promise of the chatroom's emojis |
+| `tools.plugins.expose(name, (fromApp, ...args) => {})` | let other plugins call `name`; return the answer (see [Talking to other plugins](#talking-to-other-plugins)) |
+| `tools.plugins.call(app, name, ...args)` | promise of what another plugin's exposed `name` returns |
+| `tools.plugins.publish(topic, data)` | tell every plugin subscribed to your `topic` |
+| `tools.plugins.subscribe(app, topic, (data, fromApp) => {})` | hear `topic` from `app`, or from any plugin with `'*'` |
 
 `tools.queryMsgLog` has been removed; use `tools.chat.*`.
 
@@ -185,6 +190,64 @@ To show winnings, listen with `tools.onCoins(balance => ...)` rather than
 calling `tools.getCoins()` after your result arrives: the two travel
 separately in production, and the balance can land second.
 
+## Talking to other plugins
+
+Server halves can talk to each other with `tools.plugins`, in two ways.
+
+**Calls**, when you want an answer. One plugin exposes a function, and others
+call it by app name:
+
+```js
+// server.js of "bank"
+tools.plugins.expose('balance', async (fromApp, nick) => {
+  if (fromApp !== 'casino') throw new Error('not for you');
+  return { nick, coins: 7 };
+});
+
+// server.js of "casino"
+const { coins } = await tools.plugins.call('bank', 'balance', 'someone');
+```
+
+The handler gets the caller's app name first, then the caller's arguments.
+What it returns (or resolves to) is the answer; if it throws, the call rejects
+with its message. A call also rejects if the plugin doesn't exist, doesn't
+expose that name, crashes, or takes longer than 10 seconds. On copecloud, a
+plugin nobody has opened yet is started for the call.
+
+**Topics**, for news anyone can listen to. You publish under your own name;
+others subscribe to your topic, or to that topic from any plugin with `'*'`:
+
+```js
+tools.plugins.publish('win', { nick: 'someone', points: 30 });
+
+tools.plugins.subscribe('scores', 'win', (data, fromApp) => { /* ... */ });
+tools.plugins.subscribe('*', 'win', (data, fromApp) => { /* ... */ });
+```
+
+Only running plugins hear a publish; nothing is kept for later.
+
+`fromApp` is filled in by copecloud, not the sender, so you can trust it to
+decide who may call what. Arguments, answers and published data are copied
+between processes: plain data, `Date`s and `Map`s travel, functions don't.
+Call `expose` and `subscribe` at the top level of `server.js`, not later, so
+they're in place for the first call after a restart.
+
+### Locally: stand-in plugins
+
+Here your plugin is the only one, so put stand-ins for the plugins you talk to
+in `dev-plugins/`. `dev-plugins/bank.js` is the `server.js` of a plugin called
+`bank`, run with its own `tools`. It can expose, call, publish and subscribe
+like any plugin, and it reloads when you save it. Copy in another plugin's real
+`server.js`, or write just enough to answer your calls:
+
+```js
+// dev-plugins/bank.js
+tools.plugins.expose('balance', (fromApp, nick) => ({ nick, coins: 100 }));
+```
+
+Stand-ins are never uploaded. Calling a plugin with no stand-in fails as it
+would on copecloud, and the dev server's log says which file to add.
+
 ## Dev commands
 
 Type these in the chat:
@@ -243,5 +306,7 @@ the real ones. The data behind them is not.
 - **`roomEmit` reaches everyone on copecloud** with any plugin open, not just
   your plugin's users. Events are only delivered to handlers with that name,
   so use distinctive event names.
+- **The only other plugins are your stand-ins** in `dev-plugins/`, and they
+  share your local chat, coins and tables rather than having their own wallet.
 - **Everyone here counts as logged in.** In production a guest's `user.registered`
   is false, and a guest has no wallet.
