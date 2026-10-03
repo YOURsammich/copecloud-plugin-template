@@ -26,6 +26,7 @@ plugin/
   plugin.json          name, display mode, and where to upload
   server.js            the server half, runs on copecloud
   public/client.svelte the client half, runs in the chatroom's iframe
+  public/icon.svg      optional icon (or icon.png / .webp / .jpg)
   public/...           any other client files, imported relatively
 dev-plugins/           stand-ins for other plugins yours talks to (never uploaded)
 dev/                   the local chatroom and copecloud stand-in; you shouldn't need to touch it
@@ -36,6 +37,7 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
 ```json
 {
   "name": "myplugin",
+  "description": "Ping the server and hear it pong",
   "displayMode": "sidebar",
   "permissions": [],
   "copecloudUrl": "https://cloud.cope.chat"
@@ -44,6 +46,9 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
 
 - `name` is the app name on copecloud: letters, numbers, `-` and `_`. Names are
   shared by everyone on copecloud, so pick one that's yours.
+- `description` is one line, up to 100 characters, shown under the name in the
+  chatroom's Play menu. Leave it out and uploading leaves whatever is set in
+  the copecloud editor alone.
 - `displayMode` is `sidebar` (docked next to the chat) or `floating` (a
   draggable window). It is your default; viewers can pop a plugin out or dock
   it for themselves with the buttons in its header.
@@ -55,6 +60,21 @@ dev/                   the local chatroom and copecloud stand-in; you shouldn't 
 
 An `owner` field from older versions is ignored: an upload belongs to the
 account your dev token signs in as.
+
+## Icon
+
+Players find your plugin by its icon, on the chatroom's plugin bar and in its
+Play menu. Put a square image at `plugin/public/icon.svg`, `icon.png`,
+`icon.webp` or `icon.jpg`, up to 256 KB. It's drawn at 24 to 40px with
+rounded corners, so keep it simple and don't put text in it. If there's more
+than one, the SVG wins, then PNG, WebP, JPG.
+
+Without an icon, the chatroom shows the first letter of the name on a colour
+of its own. The local plugin bar shows your icon too, and picks up changes when
+you save.
+
+You can also set the icon in the copecloud editor's app settings instead. Pick
+one place: an upload replaces the whole plugin, icon included (see below).
 
 ## Uploading to copecloud
 
@@ -80,8 +100,10 @@ copecloud refuses and you need a different `name`. A new app starts out
 it's ready.
 
 Files are sent as text, so only text files are uploaded (`.svelte`, `.js`,
-`.css`, `.json`, `.svg` and the like). Anything else in `public/`, such as
-images, is skipped, and the result lists what was skipped.
+`.css`, `.json`, `.svg` and the like), plus the [icon](#icon). Anything else in
+`public/`, such as other images, is skipped, and the result lists what was
+skipped. copecloud refuses an icon over 256 KB, or one that isn't the image
+its extension says, and the upload fails with its reason.
 
 Here's how the files map onto copecloud's file tree:
 

@@ -1,4 +1,11 @@
 
+const BUTTON = {
+  padding: '0.5rem 1rem', borderRadius: '6px', fontSize: '0.95rem',
+  fontFamily: 'inherit', cursor: 'pointer',
+};
+const DECLINE = { background: 'transparent', color: '#ddd', border: '1px solid #555' };
+const ALLOW = { background: '#2f7de1', color: '#fff', border: '1px solid #2f7de1', fontWeight: 600 };
+
 // Shown the first time someone opens a plugin that asks for wallet access,
 // before the plugin loads. Agreeing lets it take coins from them from then on
 // with no further prompts (each payment still leaves a private note in the
@@ -34,9 +41,12 @@ function PluginConsentDialog({ appname, owner, onAllow, onDecline }) {
         <div style={{ opacity: 0.7, fontSize: '0.9rem', marginBottom: '1rem' }}>
           You can take this back any time from the badge in its header, or in Settings.
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-          <button type='button' onClick={onDecline} autoFocus>Don&apos;t open</button>
-          <button type='button' onClick={onAllow}>Allow and open</button>
+        {/* The two answers look different and sit apart, so a click meant
+            for one can't land on the other. Declining has the focus, so
+            Enter is the safe answer. */}
+        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'space-between' }}>
+          <button type='button' onClick={onDecline} autoFocus style={{ ...BUTTON, ...DECLINE }}>Don&apos;t open</button>
+          <button type='button' onClick={onAllow} style={{ ...BUTTON, ...ALLOW }}>Allow and open</button>
         </div>
       </div>
     </div>

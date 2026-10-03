@@ -8,6 +8,7 @@ import CodeRunWindow from './CodeRunWindow';
 import PluginWindow from './PluginWindow';
 import { readOverrides, writeOverrides, resolveMode } from './pluginMode';
 import PluginConsentDialog from './PluginConsentDialog';
+import PluginIcon from './PluginIcon';
 import { parsePluginRequest, originOf } from './pluginBridge';
 import {
   isTrusted, requestTrustList, setPluginTrusted, useTrustedPlugins, useTrustLoaded, wantsWallet,
@@ -279,14 +280,17 @@ function App() {
           </div>
           <div className='pluginSelectionContainer'>
             {plugins.map((plugin) => (
-              <div
+              <button
+                type='button'
                 key={plugin.appname}
-                title={plugin.appname}
+                title={plugin.description ? `${plugin.appname}: ${plugin.description}` : plugin.appname}
+                aria-label={plugin.appname}
+                aria-pressed={plugin.appname === showApp}
                 className={'pluginSelect' + (plugin.appname === showApp ? ' pluginSelectActive' : '')}
                 onClick={() => setShowApp(plugin.appname)}
               >
-                {plugin.appname.slice(0, 2) + plugin.appname.slice(-2)}
-              </div>
+                <PluginIcon plugin={plugin} size={40} />
+              </button>
             ))}
           </div>
         </div>

@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { PLUGIN_DIR } = require('./build');
+const { findIcon, isIconPath } = require('./icon');
 
 const SERVER_FILE = 'server.js';
 const PUBLIC_DIR = 'public';
@@ -52,7 +53,8 @@ function target (manifest) {
     hasToken: !!readToken(),
     url: String(manifest.copecloudUrl || DEFAULT_URL).replace(/\/+$/, ''),
     displayMode: manifest.displayMode,
-    permissions: manifest.permissions || []
+    permissions: manifest.permissions || [],
+    description: manifest.description
   };
 }
 
@@ -70,6 +72,18 @@ function collectFiles () {
   }
 
   listFiles(path.join(PLUGIN_DIR, PUBLIC_DIR)).forEach(rel => {
+    //the icon is the one image copecloud stores; a PNG, WebP or JPG one goes
+    //base64-encoded (see dev/icon.js). An SVG icon is text like the rest.
+    const iconKey = PUBLIC_DIR + '/' + rel;
+    if (isIconPath(iconKey) && path.extname(rel).toLowerCase() !== '.svg') {
+      if (iconKey !== (findIcon() || {}).rel) {
+        skipped.push(iconKey);
+        return;
+      }
+      files[iconKey] = { filetype: 'base64', content: fs.readFileSync(path.join(PLUGIN_DIR, PUBLIC_DIR, rel)).toString('base64') };
+      return;
+    }
+
     if (!TEXT_EXTENSIONS.includes(path.extname(rel).toLowerCase())) {
       skipped.push(PUBLIC_DIR + '/' + rel);
       return;
@@ -103,7 +117,7 @@ async function post (url, body, token) {
 //Resolves { success, message, viewUrl?, skipped? }; never throws, since the
 //result goes straight back to the button.
 async function upload (manifest) {
-  const { name, url, displayMode, permissions } = target(manifest);
+  const { name, url, displayMode, permissions, description } = target(manifest);
   const token = readToken();
 
   if (!token) {
@@ -127,9 +141,10 @@ async function upload (manifest) {
       };
     }
 
-    //The display mode and permissions are app settings, not files. Status is left alone:
-    //going public is a decision for the copecloud editor.
-    await post(url + '/updateAppSettings', { appname: name, displayMode, permissions }, token);
+    //The display mode, permissions and description are app settings, not
+    //files. Status is left alone: going public is a decision for the
+    //copecloud editor. A description left out of plugin.json is left as is.
+    await post(url + '/updateAppSettings', { appname: name, displayMode, permissions, description }, token);
 
     //plugin pages are served from their own host; copecloud says which
     const owner = saved.data.owner;

@@ -1,6 +1,7 @@
 {
   "name": "myplugin",
+  "description": "Ping the server and hear it pong",
   "displayMode": "sidebar",
-  "owner": "",
+  "owner": "sammich",
   "copecloudUrl": "https://cloud.cope.chat"
 }

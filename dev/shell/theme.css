@@ -74,19 +74,37 @@ a {
   width: 65px;
 }
 
+/* Scrolls once there are more tiles than fit; the padding keeps the open
+   tile's ring from being clipped. */
 .pluginSelectionContainer {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 5px;
   flex: 1;
-  margin-top: 10px;
+  min-height: 0;
+  width: 100%;
+  margin-top: 8px;
+  padding: 2px 0 8px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* thin but visible, so it's clear there are more below */
+  scrollbar-width: thin;
+  scrollbar-color: #444 transparent;
 }
+
+.pluginSelect { flex: none; }
 
 .pluginSelect {
   background-color: #333;
   height: 50px;
   width: 50px;
-  border-radius: 6px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
   display: flex;
   justify-content: center;
@@ -97,9 +115,36 @@ a {
   background-color: #444;
 }
 
-.pluginSelectActive {
+.pluginSelect:focus-visible {
+  outline: 2px solid #8cf;
+  outline-offset: 1px;
+}
+
+/* The icon fills most of the tile, so the open one is ringed rather than
+   filled. */
+.pluginSelectActive,
+.pluginSelectActive:hover {
   background-color: #39f;
+  box-shadow: 0 0 0 2px #39f;
+}
+
+/* ─── Plugin icons (PluginIcon.jsx) ───────────────────────────────────────── */
+
+.pluginIcon {
+  display: block;
+  flex: none;
+  border-radius: 22%;
+  object-fit: cover;
+}
+
+.pluginIconLetter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: #fff;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
 }
 
 .appViewToggle {

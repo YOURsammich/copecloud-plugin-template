@@ -22,6 +22,7 @@ const db = require('./db');
 const wallet = require('./wallet');
 const runtime = require('./runtime');
 const uploader = require('./upload');
+const icon = require('./icon');
 const pluginClientTools = require('./clientTools');
 const { PLUGIN_DIR, OUT_DIR, buildPlugin, buildShell } = require('./build');
 
@@ -49,8 +50,15 @@ function readManifest () {
     ? manifest.permissions.filter(p => p === 'wallet')
     : [];
 
+  //one line under the name in the chatroom's Play menu; copecloud keeps 100
+  //characters. Left undefined when absent, so an upload doesn't clear one set
+  //in the copecloud editor.
+  const description = typeof manifest.description === 'string'
+    ? manifest.description.replace(/\s+/g, ' ').trim().slice(0, 100)
+    : undefined;
+
   //copecloudUrl is only used by the upload button
-  return { name, displayMode, permissions, copecloudUrl: manifest.copecloudUrl };
+  return { name, displayMode, permissions, description, copecloudUrl: manifest.copecloudUrl };
 }
 
 let manifest = readManifest();
@@ -406,8 +414,21 @@ chatServer.on('upgrade', (req, socket, head) => {
 
 // ─── copecloud (:4001) ────────────────────────────────────────────────────────
 
+//As copecloud's /getPublicApps describes a plugin. The icon URL changes with
+//the file, as copecloud's does, so the shell never shows a stale one.
 function pluginRecord () {
-  return { appname: manifest.name, owner: OWNER, status: 'public', displayMode: manifest.displayMode, permissions: manifest.permissions };
+  const found = icon.findIcon();
+  return {
+    appname: manifest.name,
+    owner: OWNER,
+    status: 'public',
+    displayMode: manifest.displayMode,
+    permissions: manifest.permissions,
+    description: manifest.description || null,
+    icon: found
+      ? `http://localhost:${PLUGIN_PORT}/icon/${encodeURIComponent(manifest.name)}?v=${Math.floor(fs.statSync(found.file).mtimeMs)}`
+      : null
+  };
 }
 
 //Same page copecloud serves at /v/:user/:appName
@@ -474,6 +495,27 @@ const pluginServer = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === '/icon/' + encodeURIComponent(manifest.name)) {
+    const found = icon.findIcon();
+    if (!found) {
+      res.writeHead(404);
+      res.end('No icon');
+      return;
+    }
+    const bytes = fs.readFileSync(found.file);
+    if (bytes.length > icon.MAX_ICON_BYTES) {
+      console.log(`[plugin] ${found.rel} is ${Math.ceil(bytes.length / 1024)} KB; copecloud takes icons up to ${icon.MAX_ICON_BYTES / 1024} KB.`);
+    }
+    res.writeHead(200, {
+      'Content-Type': found.type,
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store'
+    });
+    res.end(bytes);
+    return;
+  }
+
   if (url.pathname === '/pa/bundle.js') return sendFile(res, path.join(OUT_DIR, 'bundle.js'));
   if (url.pathname === '/pa/bundle.js.map') return sendFile(res, path.join(OUT_DIR, 'bundle.js.map'));
 
@@ -533,6 +575,9 @@ function onPluginChange (filename) {
       const before = manifest.name;
       manifest = readManifest();
       renamed = manifest.name !== before;
+    }
+    //a new icon is a new record (its URL changes), as is a new manifest
+    if (changed.includes('plugin.json') || changed.some(icon.isIconPath)) {
       chatBroadcast('pluginList', [pluginRecord()]);
     }
     if (changed.includes('server.js') || renamed) loadServerCode();
