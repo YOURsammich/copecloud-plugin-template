@@ -120,8 +120,9 @@ environment variables, no child processes. Handlers get `user` as a plain
 | `tools.chat.user(nick)` | promise of a public profile, or null |
 | `tools.chat.channel(name)` | promise of channel info and who is online |
 | `tools.wallet.balance()` | promise of your plugin's wallet: `{ coins, accept, payout }` |
-| `tools.wallet.claim(receipt)` | redeem a payment receipt: `{ ok, nick, amount, memo }` |
+| `tools.wallet.claim(receipt)` | redeem a payment receipt: `{ ok, nick, fromApp, amount, memo }` |
 | `tools.wallet.pay(nick, amount, memo)` | pay a user from your wallet: `{ ok, error }` |
+| `tools.wallet.payPlugin(app, amount, memo)` | pay another plugin from your wallet; no payout permission needed: `{ ok, receipt, error }` |
 | `tools.wallet.refund(receipt)` | give a payment back to whoever made it, once; no payout permission needed |
 | `tools.getEmojis()` | promise of the chatroom's emojis |
 | `tools.plugins.expose(name, (fromApp, ...args) => {})` | let other plugins call `name`; return the answer (see [Talking to other plugins](#talking-to-other-plugins)) |
@@ -185,6 +186,46 @@ If you take a payment you then can't honour, such as a bet bigger than you can
 cover or a game that was called off, hand it back with
 `tools.wallet.refund(receipt)`. That works without **payout**, because the
 coins can only go back to whoever paid.
+
+### Paying another plugin
+
+Plugins can pay each other from their wallets, with
+`tools.wallet.payPlugin(app, amount, memo)`:
+
+```js
+// server.js of "casino"
+const res = await tools.wallet.payPlugin('bank', 50, 'house fee');
+// { ok: true, receipt, app: 'bank', amount: 50, coins }   coins = your wallet after
+// { ok: false, error }   no such plugin, not enough coins, or it doesn't take payments
+if (res.ok) await tools.plugins.call('bank', 'deposit', res.receipt);
+```
+
+It needs no **payout** permission, since the coins stay in plugin wallets.
+The plugin you pay has to exist and accept payments. A plugin can't pay itself.
+
+The coins land in the other plugin's wallet straight away, but it isn't told.
+Pass it the receipt, usually with `tools.plugins.call` (see
+[Talking to other plugins](#talking-to-other-plugins)), and have it claim the
+receipt like a player's payment. For a payment from a plugin, `claim` gives
+`fromApp`, the plugin that paid, and `nick` is null:
+
+```js
+// server.js of "bank"
+tools.plugins.expose('deposit', async (fromApp, receipt) => {
+  const paid = await tools.wallet.claim(receipt);   // { ok, nick: null, fromApp, amount, memo }
+  if (!paid.ok || paid.fromApp !== fromApp) throw new Error('not your payment');
+  credit(paid.fromApp, paid.amount);
+  return { ok: true };
+});
+```
+
+Don't trust an amount another plugin tells you it sent; claim the receipt.
+And if your plugin takes player payments, check `paid.nick` before seating a
+player: a receipt from a plugin claims fine but has no player behind it.
+
+The plugin paid can also `tools.wallet.refund(receipt)` a payment from a
+plugin. The coins go back to the paying plugin's wallet, and the result has
+`fromApp` set instead of `nick`.
 
 To show winnings, listen with `tools.onCoins(balance => ...)` rather than
 calling `tools.getCoins()` after your result arrives: the two travel
@@ -255,8 +296,12 @@ Type these in the chat:
 - `/nick <name>` changes your nick. Your plugin's server gets the new one too.
 - `/trust <number>` sets your trust level, which your server sees as `user.trust`.
 - `/coins <number>` sets your balance. Everyone starts with ₵1000.
-- `/pluginwallet` shows your plugin's balance and permissions.
-- `/pluginperm <accept|payout> <on|off>` grants or revokes them.
+- `/pluginwallet [app]` shows your plugin's balance and permissions, or a
+  stand-in's.
+- `/pluginperm <accept|payout> <on|off> [app]` grants or revokes them.
+- `/pluginfund <750|+500|-200> [app]` sets a plugin's balance, or adds to or
+  takes from it, as an admin can in production. Use it to give a stand-in
+  coins to pay you with.
 - `/reload` reloads the plugin.
 - `/help` lists these.
 
@@ -306,7 +351,9 @@ the real ones. The data behind them is not.
 - **`roomEmit` reaches everyone on copecloud** with any plugin open, not just
   your plugin's users. Events are only delivered to handlers with that name,
   so use distinctive event names.
-- **The only other plugins are your stand-ins** in `dev-plugins/`, and they
-  share your local chat, coins and tables rather than having their own wallet.
+- **The only other plugins are your stand-ins** in `dev-plugins/`. Each has
+  its own wallet, starting empty (`/pluginfund` fills it), but they share your
+  local chat and tables. Paying a plugin with no stand-in fails as it would for
+  a plugin that doesn't exist on copecloud.
 - **Everyone here counts as logged in.** In production a guest's `user.registered`
   is false, and a guest has no wallet.

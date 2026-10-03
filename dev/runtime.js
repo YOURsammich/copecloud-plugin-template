@@ -152,18 +152,30 @@ function createTools (plugin) {
         return later(() => providers.chat.channel(name));
       }
     },
+    //Each plugin here, yours and every stand-in, has a wallet of its own.
     wallet: {
       balance () {
-        return later(() => providers.wallet.balance());
+        return later(() => providers.wallet.balance(plugin.appname));
       },
       pay (nick, amount, memo) {
-        return later(() => providers.wallet.pay(nick, amount, memo));
+        return later(() => providers.wallet.pay(plugin.appname, nick, amount, memo));
+      },
+      //As on copecloud, the plugin paid has to exist: here, yours or a
+      //stand-in in dev-plugins/.
+      payPlugin (appname, amount, memo) {
+        return later(() => {
+          if (typeof appname !== 'string' || !plugins[appname]) {
+            console.log(`[${plugin.appname}] paid ${appname}, which isn't running here. Add dev-plugins/${appname}.js to stand in for it.`);
+            return { ok: false, error: `There is no plugin called ${appname}` };
+          }
+          return providers.wallet.payPlugin(plugin.appname, appname, amount, memo);
+        });
       },
       claim (receipt) {
-        return later(() => providers.wallet.claim(receipt));
+        return later(() => providers.wallet.claim(plugin.appname, receipt));
       },
       refund (receipt) {
-        return later(() => providers.wallet.refund(receipt));
+        return later(() => providers.wallet.refund(plugin.appname, receipt));
       }
     },
     queryMsgLog () {

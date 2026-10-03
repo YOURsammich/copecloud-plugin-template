@@ -10,7 +10,8 @@ http://localhost:4000 and reloads on every save.
 writing plugin code, especially:
 
 - **The `tools` API**: every server and client call, with what it returns.
-- **Copecoins**: taking payments, claiming receipts, paying out, refunds.
+- **Copecoins**: taking payments, claiming receipts, paying out, refunds,
+  and paying other plugins.
 - **Talking to other plugins**: `tools.plugins` calls and topics, and
   stand-ins in `dev-plugins/`.
 - **Who is playing**: what `user` means and when to trust it.
@@ -29,6 +30,10 @@ rather than reaching around `tools`.
 - To know who paid, claim the receipt with `tools.wallet.claim` on the server.
   Don't trust amounts or nicks the client sends. Check `user.verified` before
   letting someone act as a chat user.
+- A payment from another plugin (`tools.wallet.payPlugin`) is claimed the same
+  way: the claim's `fromApp` says which plugin paid, and its `nick` is null.
+  Don't take another plugin's word for an amount, and check `paid.nick` before
+  treating a receipt as a player's payment.
 - Tables are shared with every plugin on copecloud: prefix table names with
   the plugin's name.
 - Use distinctive event names; `roomEmit` reaches every plugin's viewers in

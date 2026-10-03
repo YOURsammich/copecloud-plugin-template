@@ -188,22 +188,31 @@ const COMMANDS = {
     publishBalance(user.nick);
     systemMessage(user, `you now have ₵${coins}`);
   },
-  //The chatroom's /pluginwallet and /pluginperm, for your plugin only.
-  pluginwallet (user) {
-    const w = wallet.wallet(manifest.name);
+  //The chatroom's /pluginwallet and /pluginperm, and the admin panel's
+  //funding. Your plugin, unless you name a stand-in from dev-plugins/.
+  pluginwallet (user, arg) {
+    const w = wallet.wallet((arg || '').trim() || manifest.name);
     systemMessage(user, `${w.appname}: ₵${w.coins}, accept payments ${w.accept ? 'on' : 'off'}, pay out ${w.payout ? 'on' : 'off'}`);
   },
   pluginperm (user, arg) {
-    const [perm, state] = arg.toLowerCase().split(/\s+/);
-    if (!['accept', 'payout'].includes(perm) || !['on', 'off'].includes(state)) {
-      return systemMessage(user, 'usage: /pluginperm <accept|payout> <on|off>');
+    const [perm, state, appname] = arg.split(/\s+/);
+    if (!['accept', 'payout'].includes(perm.toLowerCase()) || !['on', 'off'].includes(String(state).toLowerCase())) {
+      return systemMessage(user, 'usage: /pluginperm <accept|payout> <on|off> [app]');
     }
-    wallet.setPermission(manifest.name, perm, state === 'on');
-    COMMANDS.pluginwallet(user);
+    wallet.setPermission(appname || manifest.name, perm.toLowerCase(), state.toLowerCase() === 'on');
+    COMMANDS.pluginwallet(user, appname);
+  },
+  pluginfund (user, arg) {
+    const [change, appname] = arg.split(/\s+/);
+    if (!wallet.fund(appname || manifest.name, change)) {
+      return systemMessage(user, 'usage: /pluginfund <750|+500|-200> [app]');
+    }
+    COMMANDS.pluginwallet(user, appname);
   },
   help (user) {
     systemMessage(user, '/nick <name>  /trust <number>  /reload (reload the plugin)  ' +
-      '/coins <number>  /pluginwallet  /pluginperm <accept|payout> <on|off>');
+      '/coins <number>  /pluginwallet [app]  /pluginperm <accept|payout> <on|off> [app]  ' +
+      '/pluginfund <750|+500|-200> [app]');
   }
 };
 
@@ -274,19 +283,21 @@ runtime.configure({
       online: chatUsers.map(u => ({ nick: u.nick, registered: true, afk: false }))
     })
   },
+  //each takes the app name of the plugin asking: yours or a stand-in
   wallet: {
-    balance: () => wallet.wallet(manifest.name),
-    claim: (receipt) => wallet.claim(manifest.name, receipt),
-    refund (receipt) {
-      const result = wallet.refund(manifest.name, receipt);
+    balance: (appname) => wallet.wallet(appname),
+    claim: (appname, receipt) => wallet.claim(appname, receipt),
+    refund (appname, receipt) {
+      const result = wallet.refund(appname, receipt);
+      if (result.ok && result.nick) publishBalance(result.nick);
+      return result;
+    },
+    pay (appname, nick, amount, memo) {
+      const result = wallet.payOut(appname, nick, amount, memo, chatUsers);
       if (result.ok) publishBalance(result.nick);
       return result;
     },
-    pay (nick, amount, memo) {
-      const result = wallet.payOut(manifest.name, nick, amount, memo, chatUsers);
-      if (result.ok) publishBalance(result.nick);
-      return result;
-    }
+    payPlugin: (appname, to, amount, memo) => wallet.sendToPlugin(appname, to, amount, memo)
   }
 });
 
